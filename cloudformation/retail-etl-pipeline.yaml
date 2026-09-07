@@ -5,17 +5,17 @@ Description: >
 Parameters:
   RawBucketName:
     Type: String
-    Default: retail-etl-raw-2026-014
+    Default: retail-etl-raw-2026-014-cfn
     Description: Name of the raw S3 bucket
 
   ProcessedBucketName:
     Type: String
-    Default: retail-etl-processed-2026-014
+    Default: retail-etl-processed-2026-014-cfn
     Description: Name of the processed S3 bucket
 
   GlueDatabaseName:
     Type: String
-    Default: retail_etl_catalog_db
+    Default: retail_etl_catalog_db_cfn
     Description: Glue Data Catalog database name
 
 Resources:
@@ -76,7 +76,7 @@ Resources:
   LambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: RetailETL-Lambda-Role
+      RoleName: RetailETL-Lambda-Role-CFN
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -92,22 +92,22 @@ Resources:
               - Sid: StartSpecificGlueWorkflow
                 Effect: Allow
                 Action: glue:StartWorkflowRun
-                Resource: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/RetailETL-Workflow
+                Resource: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/RetailETL-Workflow-CFN
               - Sid: CreateLambdaLogGroup
                 Effect: Allow
                 Action: logs:CreateLogGroup
-                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/RetailETL-Trigger-Lambda
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/RetailETL-Trigger-Lambda-CFN
               - Sid: WriteLambdaLogs
                 Effect: Allow
                 Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/RetailETL-Trigger-Lambda:*
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/RetailETL-Trigger-Lambda-CFN:*
 
   GlueETLRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: RetailETL-Glue-ETL-Role
+      RoleName: RetailETL-Glue-ETL-Role-CFN
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -150,7 +150,7 @@ Resources:
   GlueCrawlerRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: RetailETL-Glue-Crawler-Role
+      RoleName: RetailETL-Glue-Crawler-Role-CFN
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -198,7 +198,7 @@ Resources:
   TriggerLambda:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: RetailETL-Trigger-Lambda
+      FunctionName: RetailETL-Trigger-Lambda-CFN
       Runtime: python3.12
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaRole.Arn
@@ -209,7 +209,7 @@ Resources:
           import boto3
 
           glue = boto3.client('glue')
-          WORKFLOW_NAME = "RetailETL-Workflow"
+          WORKFLOW_NAME = "RetailETL-Workflow-CFN"
 
           def lambda_handler(event, context):
               for record in event.get('Records', []):
@@ -239,14 +239,14 @@ Resources:
   GluePythonShellJob:
     Type: AWS::Glue::Job
     Properties:
-      Name: RetailETL-PythonShell-Job
+      Name: RetailETL-PythonShell-Job-CFN
       Role: !GetAtt GlueETLRole.Arn
       Command:
         Name: pythonshell
         PythonVersion: '3.9'
         ScriptLocation: !Sub s3://${RawBucketName}/scripts/glue_job.py
       DefaultArguments:
-        '--JOB_NAME': RetailETL-PythonShell-Job
+        '--JOB_NAME': RetailETL-PythonShell-Job-CFN
         '--input_bucket': !Ref RawBucketName
         '--input_key': input/sales.csv
         '--output_bucket': !Ref ProcessedBucketName
@@ -263,7 +263,7 @@ Resources:
   InputCrawler:
     Type: AWS::Glue::Crawler
     Properties:
-      Name: RetailETL-Input-Crawler
+      Name: RetailETL-Input-Crawler-CFN
       Role: !GetAtt GlueCrawlerRole.Arn
       DatabaseName: !Ref GlueDatabaseName
       Targets:
@@ -276,7 +276,7 @@ Resources:
   ProcessedCrawler:
     Type: AWS::Glue::Crawler
     Properties:
-      Name: RetailETL-Processed-Crawler
+      Name: RetailETL-Processed-Crawler-CFN
       Role: !GetAtt GlueCrawlerRole.Arn
       DatabaseName: !Ref GlueDatabaseName
       Targets:
@@ -291,13 +291,13 @@ Resources:
   GlueWorkflow:
     Type: AWS::Glue::Workflow
     Properties:
-      Name: RetailETL-Workflow
+      Name: RetailETL-Workflow-CFN
       Description: Retail ETL workflow - Input Crawler -> Python Shell ETL -> Output Crawler
 
   WorkflowStartTrigger:
     Type: AWS::Glue::Trigger
     Properties:
-      Name: RetailETL-Input-Trigger
+      Name: RetailETL-Input-Trigger-CFN
       WorkflowName: !Ref GlueWorkflow
       Type: ON_DEMAND
       Actions:
@@ -306,7 +306,7 @@ Resources:
   PythonShellStartTrigger:
     Type: AWS::Glue::Trigger
     Properties:
-      Name: PythonShellStart-Trigger
+      Name: PythonShellStart-Trigger-CFN
       WorkflowName: !Ref GlueWorkflow
       Type: CONDITIONAL
       StartOnCreation: true
@@ -321,7 +321,7 @@ Resources:
   OutputCrawlerTrigger:
     Type: AWS::Glue::Trigger
     Properties:
-      Name: OutputCrawler-Trigger
+      Name: OutputCrawler-Trigger-CFN
       WorkflowName: !Ref GlueWorkflow
       Type: CONDITIONAL
       StartOnCreation: true

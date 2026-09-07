@@ -43,3 +43,7 @@ jobs:
             --stack-name retail-etl-pipeline \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset
+
+      - name: Upload Glue script to CFN bucket
+        run: |
+          aws s3 cp glue/glue_job.py s3://retail-etl-raw-2026-014-cfn/scripts/glue_job.py
