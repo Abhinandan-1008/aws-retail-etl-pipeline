@@ -1,0 +1,6 @@
+order_id,customer_name,product,category,quantity,price
+1001,Rahul,Laptop,Electronics,1,55000
+1002,Priya,Mouse,Electronics,2,750
+1003,Arun,Keyboard,Electronics,1,1200
+1004,Neha,Monitor,Electronics,2,15000
+1005,Ravi,Chair,Furniture,1,8500
