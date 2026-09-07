@@ -35,17 +35,6 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: input/
-                  - Name: suffix
-                    Value: .csv
-            Function: !GetAtt TriggerLambda.Arn
 
   ProcessedBucket:
     Type: AWS::S3::Bucket
@@ -85,7 +74,7 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: RetailETL-Lambda-Access
+        - PolicyName: RetailETL-Lambda-Access-CFN
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -118,7 +107,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
       Policies:
-        - PolicyName: RetailETL-Glue-ETL-Access
+        - PolicyName: RetailETL-Glue-ETL-Access-CFN
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -161,7 +150,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
       Policies:
-        - PolicyName: RetailETL-Glue-Crawler-Access
+        - PolicyName: RetailETL-Glue-Crawler-Access-CFN
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -197,6 +186,7 @@ Resources:
 
   TriggerLambda:
     Type: AWS::Lambda::Function
+    DependsOn: LambdaRole
     Properties:
       FunctionName: RetailETL-Trigger-Lambda-CFN
       Runtime: python3.12
@@ -228,6 +218,7 @@ Resources:
 
   LambdaS3Permission:
     Type: AWS::Lambda::Permission
+    DependsOn: TriggerLambda
     Properties:
       FunctionName: !GetAtt TriggerLambda.Arn
       Action: lambda:InvokeFunction
@@ -238,6 +229,9 @@ Resources:
 
   GluePythonShellJob:
     Type: AWS::Glue::Job
+    DependsOn:
+      - GlueETLRole
+      - RawBucket
     Properties:
       Name: RetailETL-PythonShell-Job-CFN
       Role: !GetAtt GlueETLRole.Arn
@@ -262,6 +256,10 @@ Resources:
 
   InputCrawler:
     Type: AWS::Glue::Crawler
+    DependsOn:
+      - GlueCrawlerRole
+      - GlueDatabase
+      - RawBucket
     Properties:
       Name: RetailETL-Input-Crawler-CFN
       Role: !GetAtt GlueCrawlerRole.Arn
@@ -275,6 +273,10 @@ Resources:
 
   ProcessedCrawler:
     Type: AWS::Glue::Crawler
+    DependsOn:
+      - GlueCrawlerRole
+      - GlueDatabase
+      - ProcessedBucket
     Properties:
       Name: RetailETL-Processed-Crawler-CFN
       Role: !GetAtt GlueCrawlerRole.Arn
@@ -296,42 +298,53 @@ Resources:
 
   WorkflowStartTrigger:
     Type: AWS::Glue::Trigger
+    DependsOn:
+      - GlueWorkflow
+      - InputCrawler
     Properties:
       Name: RetailETL-Input-Trigger-CFN
-      WorkflowName: !Ref GlueWorkflow
+      WorkflowName: RetailETL-Workflow-CFN
       Type: ON_DEMAND
       Actions:
-        - CrawlerName: !Ref InputCrawler
+        - CrawlerName: RetailETL-Input-Crawler-CFN
 
   PythonShellStartTrigger:
     Type: AWS::Glue::Trigger
+    DependsOn:
+      - GlueWorkflow
+      - InputCrawler
+      - GluePythonShellJob
     Properties:
       Name: PythonShellStart-Trigger-CFN
-      WorkflowName: !Ref GlueWorkflow
+      WorkflowName: RetailETL-Workflow-CFN
       Type: CONDITIONAL
       StartOnCreation: true
       Predicate:
         Conditions:
           - LogicalOperator: EQUALS
-            CrawlerName: !Ref InputCrawler
+            CrawlerName: RetailETL-Input-Crawler-CFN
             CrawlState: SUCCEEDED
       Actions:
-        - JobName: !Ref GluePythonShellJob
+        - JobName: RetailETL-PythonShell-Job-CFN
 
   OutputCrawlerTrigger:
     Type: AWS::Glue::Trigger
+    DependsOn:
+      - GlueWorkflow
+      - GluePythonShellJob
+      - ProcessedCrawler
     Properties:
       Name: OutputCrawler-Trigger-CFN
-      WorkflowName: !Ref GlueWorkflow
+      WorkflowName: RetailETL-Workflow-CFN
       Type: CONDITIONAL
       StartOnCreation: true
       Predicate:
         Conditions:
           - LogicalOperator: EQUALS
-            JobName: !Ref GluePythonShellJob
+            JobName: RetailETL-PythonShell-Job-CFN
             State: SUCCEEDED
       Actions:
-        - CrawlerName: !Ref ProcessedCrawler
+        - CrawlerName: RetailETL-Processed-Crawler-CFN
 
 Outputs:
   RawBucketName:
