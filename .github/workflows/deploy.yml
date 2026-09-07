@@ -26,7 +26,9 @@ jobs:
 
       - name: Update Lambda function code
         run: |
-          zip lambda.zip lambda/lambda_function.py
+          cd lambda
+          zip ../lambda.zip lambda_function.py
+          cd ..
           aws lambda update-function-code \
             --function-name RetailETL-Trigger-Lambda \
             --zip-file fileb://lambda.zip
