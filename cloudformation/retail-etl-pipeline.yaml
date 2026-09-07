@@ -1,0 +1,355 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Retail ETL Pipeline - S3 -> Lambda -> Glue Workflow -> Crawlers -> Python Shell ETL -> Athena
+
+Parameters:
+  RawBucketName:
+    Type: String
+    Default: retail-etl-raw-2026-014
+    Description: Name of the raw S3 bucket
+
+  ProcessedBucketName:
+    Type: String
+    Default: retail-etl-processed-2026-014
+    Description: Name of the processed S3 bucket
+
+  GlueDatabaseName:
+    Type: String
+    Default: retail_etl_catalog_db
+    Description: Glue Data Catalog database name
+
+Resources:
+
+  # ── S3 Buckets ──────────────────────────────────────────────────────────────
+
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref RawBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: input/
+                  - Name: suffix
+                    Value: .csv
+            Function: !GetAtt TriggerLambda.Arn
+
+  ProcessedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ProcessedBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ── Glue Database ────────────────────────────────────────────────────────────
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref GlueDatabaseName
+        Description: Glue Data Catalog database for Retail ETL pipeline
+
+  # ── IAM Roles ────────────────────────────────────────────────────────────────
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: RetailETL-Lambda-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RetailETL-Lambda-Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: StartSpecificGlueWorkflow
+                Effect: Allow
+                Action: glue:StartWorkflowRun
+                Resource: !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:workflow/RetailETL-Workflow
+              - Sid: CreateLambdaLogGroup
+                Effect: Allow
+                Action: logs:CreateLogGroup
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/RetailETL-Trigger-Lambda
+              - Sid: WriteLambdaLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/RetailETL-Trigger-Lambda:*
+
+  GlueETLRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: RetailETL-Glue-ETL-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: RetailETL-Glue-ETL-Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadRawInput
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${RawBucketName}
+                  - !Sub arn:aws:s3:::${RawBucketName}/*
+              - Sid: WriteProcessedOutput
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${ProcessedBucketName}
+                  - !Sub arn:aws:s3:::${ProcessedBucketName}/*
+              - Sid: ReadGlueCatalog
+                Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetTable
+                  - glue:GetPartitions
+                Resource: '*'
+
+  GlueCrawlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: RetailETL-Glue-Crawler-Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: RetailETL-Glue-Crawler-Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadRawBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${RawBucketName}
+                  - !Sub arn:aws:s3:::${RawBucketName}/*
+              - Sid: ReadProcessedBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${ProcessedBucketName}
+                  - !Sub arn:aws:s3:::${ProcessedBucketName}/*
+              - Sid: ManageGlueCatalog
+                Effect: Allow
+                Action:
+                  - glue:CreateTable
+                  - glue:UpdateTable
+                  - glue:GetTable
+                  - glue:GetDatabase
+                  - glue:CreatePartition
+                  - glue:UpdatePartition
+                  - glue:BatchCreatePartition
+                Resource: '*'
+
+  # ── Lambda Function ──────────────────────────────────────────────────────────
+
+  TriggerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: RetailETL-Trigger-Lambda
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 15
+      MemorySize: 128
+      Code:
+        ZipFile: |
+          import boto3
+
+          glue = boto3.client('glue')
+          WORKFLOW_NAME = "RetailETL-Workflow"
+
+          def lambda_handler(event, context):
+              for record in event.get('Records', []):
+                  key = record['s3']['object']['key']
+                  size = record['s3']['object'].get('size', 0)
+                  if not key.startswith('input/'):
+                      continue
+                  if not key.lower().endswith('.csv'):
+                      continue
+                  if size == 0:
+                      continue
+                  print(f"Valid trigger file: {key}, size={size}")
+                  response = glue.start_workflow_run(Name=WORKFLOW_NAME)
+                  print(f"Started workflow run: {response['RunId']}")
+              return {"statusCode": 200}
+
+  LambdaS3Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt TriggerLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${RawBucketName}
+
+  # ── Glue Python Shell Job ────────────────────────────────────────────────────
+
+  GluePythonShellJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: RetailETL-PythonShell-Job
+      Role: !GetAtt GlueETLRole.Arn
+      Command:
+        Name: pythonshell
+        PythonVersion: '3.9'
+        ScriptLocation: !Sub s3://${RawBucketName}/scripts/glue_job.py
+      DefaultArguments:
+        '--JOB_NAME': RetailETL-PythonShell-Job
+        '--input_bucket': !Ref RawBucketName
+        '--input_key': input/sales.csv
+        '--output_bucket': !Ref ProcessedBucketName
+        '--output_key': output/sales_transformed.csv
+        '--job-language': python
+        'library-set': analytics
+      MaxCapacity: 0.0625
+      MaxRetries: 0
+      Timeout: 15
+      GlueVersion: '3.0'
+
+  # ── Glue Crawlers ────────────────────────────────────────────────────────────
+
+  InputCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: RetailETL-Input-Crawler
+      Role: !GetAtt GlueCrawlerRole.Arn
+      DatabaseName: !Ref GlueDatabaseName
+      Targets:
+        S3Targets:
+          - Path: !Sub s3://${RawBucketName}/input/
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: DEPRECATE_IN_DATABASE
+
+  ProcessedCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: RetailETL-Processed-Crawler
+      Role: !GetAtt GlueCrawlerRole.Arn
+      DatabaseName: !Ref GlueDatabaseName
+      Targets:
+        S3Targets:
+          - Path: !Sub s3://${ProcessedBucketName}/output/
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: DEPRECATE_IN_DATABASE
+
+  # ── Glue Workflow ────────────────────────────────────────────────────────────
+
+  GlueWorkflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Name: RetailETL-Workflow
+      Description: Retail ETL workflow - Input Crawler -> Python Shell ETL -> Output Crawler
+
+  WorkflowStartTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: RetailETL-Input-Trigger
+      WorkflowName: !Ref GlueWorkflow
+      Type: ON_DEMAND
+      Actions:
+        - CrawlerName: !Ref InputCrawler
+
+  PythonShellStartTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: PythonShellStart-Trigger
+      WorkflowName: !Ref GlueWorkflow
+      Type: CONDITIONAL
+      StartOnCreation: true
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            CrawlerName: !Ref InputCrawler
+            CrawlState: SUCCEEDED
+      Actions:
+        - JobName: !Ref GluePythonShellJob
+
+  OutputCrawlerTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: OutputCrawler-Trigger
+      WorkflowName: !Ref GlueWorkflow
+      Type: CONDITIONAL
+      StartOnCreation: true
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            JobName: !Ref GluePythonShellJob
+            State: SUCCEEDED
+      Actions:
+        - CrawlerName: !Ref ProcessedCrawler
+
+Outputs:
+  RawBucketName:
+    Value: !Ref RawBucket
+    Description: Raw S3 bucket name
+
+  ProcessedBucketName:
+    Value: !Ref ProcessedBucket
+    Description: Processed S3 bucket name
+
+  LambdaFunctionName:
+    Value: !Ref TriggerLambda
+    Description: Lambda function name
+
+  GlueWorkflowName:
+    Value: !Ref GlueWorkflow
+    Description: Glue Workflow name
+
+  GlueDatabaseName:
+    Value: !Ref GlueDatabase
+    Description: Glue Data Catalog database name

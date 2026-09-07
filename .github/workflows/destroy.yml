@@ -26,3 +26,8 @@ jobs:
         run: |
           aws lambda delete-function \
             --function-name RetailETL-Trigger-Lambda
+
+      - name: Delete CloudFormation stack
+        run: |
+          aws cloudformation delete-stack \
+            --stack-name retail-etl-pipeline
