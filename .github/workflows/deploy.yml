@@ -29,6 +29,8 @@ jobs:
           cd lambda
           zip -r ../lambda.zip .
           cd ..
+          ls -lh lambda.zip
+          unzip -l lambda.zip
           aws lambda update-function-code \
             --function-name RetailETL-Trigger-Lambda \
-            --zip-file fileb://lambda.zip
+            --zip-file fileb://$GITHUB_WORKSPACE/lambda.zip
